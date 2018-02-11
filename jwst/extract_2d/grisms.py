@@ -4,10 +4,9 @@
 
 import logging
 import copy
-import numpy as np
 from astropy.modeling.models import Shift, Const1D, Mapping, Identity
 
-from .. import datamodels
+from ..datamodels import MultiSlitModel, SlitModel
 from ..assign_wcs import util
 
 
@@ -21,7 +20,7 @@ def extract_grism_objects(input_model, grism_objects=[], reference_files={}):
 
     Parameters
     ----------
-    input_model : jwst.datamodels.ImageModel
+    input_model : jwst.datamodels.SlitModel()
 
     grism_objects : list(GrismObject)
         A list of GrismObjects
@@ -46,6 +45,9 @@ def extract_grism_objects(input_model, grism_objects=[], reference_files={}):
     boxes that will be used to define the 2d extraction area.
 
     """
+    if not isinstance(input_model, SlitModel):
+        raise TypeError("Expected SlitModel input")
+
     if not grism_objects:
         # get the wavelengthrange reference file from the input_model
         if (not reference_files['wavelengthrange'] or reference_files['wavelengthrange'] == 'N/A'):
@@ -59,7 +61,7 @@ def extract_grism_objects(input_model, grism_objects=[], reference_files={}):
             raise ValueError("Expected input grism objects to be a list")
 
     log.info("Creating output model")
-    output_model = datamodels.MultiSlitModel()
+    output_model = MultiSlitModel()
     output_model.update(input_model)
 
     # One WCS model can be used to govern all the extractions
@@ -124,22 +126,23 @@ def extract_grism_objects(input_model, grism_objects=[], reference_files={}):
             # subwcs.set_transform('detector', 'grism_detector', tr)
 
             log.info("Subarray extracted for obj: {} order: {}:".format(obj.sid, order))
-            log.info("Subarray extents are: (xmin:{}, ymin:{}), (xmax:{}, ymax:{})".format(xmin,ymin,xmax,ymax))
+            log.info("Subarray extents are: (xmin:{}, ymin:{}), (xmax:{}, ymax:{})"
+                     .format(xmin, ymin, xmax, ymax))
 
-            ext_data = input_model.data[ymin : ymax + 1, xmin : xmax + 1].copy()
-            ext_err = input_model.err[ymin : ymax + 1, xmin : xmax + 1].copy()
-            ext_dq = input_model.dq[ymin : ymax + 1, xmin : xmax + 1].copy()
+            ext_data = input_model.data[ymin: ymax + 1, xmin: xmax + 1].copy()
+            ext_err = input_model.err[ymin: ymax + 1, xmin: xmax + 1].copy()
+            ext_dq = input_model.dq[ymin: ymax + 1, xmin: xmax + 1].copy()
 
-
-            #new_model = datamodels.ImageModel(data=ext_data, err=ext_err, dq=ext_dq)
-            new_model = datamodels.SlitModel(data=ext_data, err=ext_err, dq=ext_dq)
+            new_model = SlitModel(data=ext_data, err=ext_err, dq=ext_dq)
             new_model.meta.wcs = subwcs
+
             # Not sure this makes sense for grism exposures since the trace
             # doesn't really have a footprint itself, it relates back to the
             # size of the object in the direct image. So what is really wanted
             # here?
             # util.update_s_region(new_model)
             new_model.meta.wcsinfo.spectral_order = order
+
             # set x/ystart values relative to the image (screen) frame.
             # The overall subarray offset is recorded in model.meta.subarray.
             # nslit = obj.sid - 1  # catalog id starts at zero
@@ -154,6 +157,7 @@ def extract_grism_objects(input_model, grism_objects=[], reference_files={}):
             new_model.bunit_data = input_model.meta.bunit_data
             new_model.bunit_err = input_model.meta.bunit_err
             slits.append(new_model)
+
     output_model.slits.extend(slits)
     del subwcs
     return output_model
@@ -176,4 +180,3 @@ def compute_dispersion(wcs):
 
     """
     raise NotImplementedError
-
