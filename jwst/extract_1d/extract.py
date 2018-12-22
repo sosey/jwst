@@ -18,8 +18,8 @@ from . import spec_wcs
 log = logging.getLogger(__name__)
 log.setLevel(logging.DEBUG)
 
-WFSS_EXPTYPES = ['NIS_WFSS', 'NRC_WFSS', 'NRC_GRISM', 'NRC_TSGRISM']
 """Exposure types to be regarded as wide-field slitless spectroscopy."""
+WFSS_EXPTYPES = ['NIS_WFSS', 'NRC_WFSS', 'NRC_GRISM', 'NRC_TSGRISM']
 
 # These values are used to indicate whether the input reference file
 # (if any) is JSON or IMAGE.
@@ -219,6 +219,7 @@ def get_extract_parameters(ref_dict,
         extract_params['independent_var'] = 'pixel'
         extract_params['smoothing_length'] = 0  # because no background sub.
         extract_params['bkg_order'] = 0         # because no background sub.
+        extract_params['dispaxis'] = None
         # Note that extract_params['dispaxis'] is not assigned.  This will
         # be done later by calling find_dispaxis().
 
@@ -339,11 +340,6 @@ def find_dispaxis(input_model, slit, spectral_order, extract_params):
 
     if 'dispaxis' in extract_params:
         initial_value = extract_params['dispaxis']
-    else:
-        initial_value = None
-        # There needs to be a default value for dispaxis.  If this can't be
-        # updated with a valid value, we will not extract the spectrum.
-        extract_params['dispaxis'] = None
 
     if slit == DUMMY:
         shape = input_model.data.shape[-2:]
@@ -442,76 +438,86 @@ def find_dispaxis(input_model, slit, spectral_order, extract_params):
         elif dwlx < dwly:
             dispaxis = VERTICAL
     else:
-        if n_inputs > 2:
-            stuff = transform(x_cent, y_cent, spectral_order)
-            wl_00 = stuff[2]
-            stuff = transform(x_cent, y_cent + 1, spectral_order)
-            wl_01 = stuff[2]
-            stuff = transform(x_cent + 1, y_cent, spectral_order)
-            wl_10 = stuff[2]
-        else:
-            stuff = transform(x_cent, y_cent)
-            wl_00 = stuff[2]
-            stuff = transform(x_cent, y_cent + 1)
-            wl_01 = stuff[2]
-            stuff = transform(x_cent + 1, y_cent)
-            wl_10 = stuff[2]
-        dwlx = wl_10 - wl_00
-        dwly = wl_01 - wl_00
-        if (np.isnan(dwlx) or np.isnan(dwly) or
-            wl_00 == 0 or wl_01 == 0 or wl_10 == 0):
-                log.warning("wavelength from WCS is NaN or 0 "
-                            "within the bounding box")
-                if input_model.meta.exposure.type in WFSS_EXPTYPES:
-                    wl_wcs = np.zeros(shape, dtype=np.float64)
-                    log.debug("Starting to compute wavelengths ...")
-                    if n_inputs > 2:
-                        for j in range(shape[0]):
-                            for i in range(shape[1]):
-                                stuff = transform(i, j, spectral_order)
-                                if stuff[2] == 0.:
-                                    wl_wcs[j, i] = np.nan
-                                else:
-                                    wl_wcs[j, i] = stuff[2]
-                    else:
-                        for j in range(shape[0]):
-                            for i in range(shape[1]):
-                                stuff = transform(i, j)
-                                if stuff[2] == 0.:
-                                    wl_wcs[j, i] = np.nan
-                                else:
-                                    wl_wcs[j, i] = stuff[2]
-                    log.debug("... finished computing wavelengths")
-                else:
-                    grid = np.indices(shape, dtype=np.float64)
-                    if n_inputs > 2:
-                        stuff = transform(grid[1], grid[0], spectral_order)
-                    else:
-                        stuff = transform(grid[1], grid[0])
-                    wl_wcs = stuff[2].copy()
-                    del grid, stuff
-                    # Flag wavelength = 0 as invalid.
-                    mask = (wl_wcs == 0)
-                    if np.any(mask):
-                        wl_wcs[mask] = np.nan
-                    del mask
-                dwlx = wl_wcs[:, 1:] - wl_wcs[:, 0:-1]
-                dwly = wl_wcs[1:, :] - wl_wcs[0:-1, :]
-                dwlx = np.nanmean(dwlx)
-                dwly = np.nanmean(dwly)
-        log.debug("find_dispaxis, using wcs:  dwlx = %s dwly = %s",
-                  str(dwlx), str(dwly))
-        if np.isnan(dwlx) or np.isnan(dwly):
-            log.warning("dwlx and/or dwly is STILL NaN!  "
-                        "Can't determine dispaxis from WCS")
-        else:
-            dwlx = np.abs(dwlx)
-            dwly = np.abs(dwly)
-            if dwlx > dwly:
-                dispaxis = HORIZONTAL
-            elif dwlx < dwly:
+        if input_model.meta.exposure.type in WFSS_EXPTYPES:
+            # Figure out the dispersion direction
+            # This just assumes that the dispersion is in the direction
+            # of the largest box extent. Verify if this is a complete solution,
+            # but I don't think that the dispersion extent for any WFSS mode
+            # should be less than the cross dispersion size of the object, possibly
+            # not true for irregular, non-symmetrical objects.
+            wfss_y, wfss_x = slit.data.shape
+            log.info('wfss_y {}\nwfss_x {}'.format(wfss_y, wfss_x))
+            if wfss_y > wfss_x:
                 dispaxis = VERTICAL
-
+            else:
+                dispaxis = HORIZONTAL
+        else:
+            if n_inputs > 2:
+                stuff = transform(x_cent, y_cent, spectral_order)
+                wl_00 = stuff[2]
+                stuff = transform(x_cent, y_cent + 1, spectral_order)
+                wl_01 = stuff[2]
+                stuff = transform(x_cent + 1, y_cent, spectral_order)
+                wl_10 = stuff[2]
+            else:
+                stuff = transform(x_cent, y_cent)
+                wl_00 = stuff[2]
+                stuff = transform(x_cent, y_cent + 1)
+                wl_01 = stuff[2]
+                stuff = transform(x_cent + 1, y_cent)
+                wl_10 = stuff[2]
+            dwlx = wl_10 - wl_00
+            dwly = wl_01 - wl_00
+            if (np.isnan(dwlx) or np.isnan(dwly) or
+                wl_00 == 0 or wl_01 == 0 or wl_10 == 0):
+                    log.warning("wavelength from WCS is NaN or 0 "
+                                "within the bounding box")
+                    if input_model.meta.exposure.type in WFSS_EXPTYPES:
+                        wl_wcs = np.zeros(shape, dtype=np.float64)
+                        log.debug("Starting to compute wavelengths ...")
+                        if n_inputs != 2:
+                            error_text = ("Input model wcs has too many inputs,"
+                                          "expected 2 but got {0} ".format(n_inputs))
+                            log.warning(error_text)
+                            raise ValueError(error_text)
+                        else:
+                            for j in range(shape[0]):
+                                for i in range(shape[1]):
+                                    stuff = transform(i, j)
+                                    if stuff[2] == 0.:
+                                        wl_wcs[j, i] = np.nan
+                                    else:
+                                        wl_wcs[j, i] = stuff[2]
+                        log.debug("... finished computing wavelengths")
+                    else:
+                        grid = np.indices(shape, dtype=np.float64)
+                        if n_inputs > 2:
+                            stuff = transform(grid[1], grid[0], spectral_order)
+                        else:
+                            stuff = transform(grid[1], grid[0])
+                        wl_wcs = stuff[2].copy()
+                        del grid, stuff
+                        # Flag wavelength = 0 as invalid.
+                        mask = (wl_wcs == 0)
+                        if np.any(mask):
+                            wl_wcs[mask] = np.nan
+                        del mask
+                    dwlx = wl_wcs[:, 1:] - wl_wcs[:, 0:-1]
+                    dwly = wl_wcs[1:, :] - wl_wcs[0:-1, :]
+                    dwlx = np.nanmean(dwlx)
+                    dwly = np.nanmean(dwly)
+            log.debug("find_dispaxis, using wcs:  dwlx = %s dwly = %s",
+                      str(dwlx), str(dwly))
+            if np.isnan(dwlx) or np.isnan(dwly):
+                log.warning("dwlx and/or dwly is STILL NaN!  "
+                            "Can't determine dispaxis from WCS")
+            else:
+                dwlx = np.abs(dwlx)
+                dwly = np.abs(dwly)
+                if dwlx > dwly:
+                    dispaxis = HORIZONTAL
+                elif dwlx < dwly:
+                    dispaxis = VERTICAL
     if dispaxis is None:
         log.warning("Can't determine dispaxis from the WCS.")
     elif initial_value is None:
@@ -1813,27 +1819,21 @@ class ExtractModel(ExtractBase):
                 log.debug("Wavelengths are from the wcs function.")
             nelem = slice1 - slice0
             if self.exp_type in WFSS_EXPTYPES:
-                # We expect two (x and y) or three (x, y, spectral order).
+                # We expect two (x and y) inputs.
                 n_inputs = self.wcs.forward_transform.n_inputs
-                ra = np.zeros(nelem, dtype=np.float64)
-                dec = np.zeros(nelem, dtype=np.float64)
-                # Temporary variable so as not to clobber `wavelength`.
-                wcs_wl = np.zeros(nelem, dtype=np.float64)
-                transform = self.wcs.forward_transform
-                if n_inputs == 2:
-                    for i in range(nelem):
-                        ra[i], dec[i], wcs_wl[i], _ = transform(
-                                        x_array[i], y_array[i])
-                elif n_inputs == 3:
-                    for i in range(nelem):
-                        ra[i], dec[i], wcs_wl[i], _ = transform(
-                                x_array[i], y_array[i], self.spectral_order)
+                if n_inputs != 2:
+                    error_text = ("Input model wcs has too many inputs,"
+                                  "expected 2 but got {0} ".format(n_inputs))
+                    log.warning(error_text)
+                    raise ValueError(error_text)
                 else:
-                    if verbose:
-                        log.warning("n_inputs for wcs function is %d",
-                                    n_inputs)
-                        log.warning("WCS function was expected to take "
-                                    "either 2 or 3 arguments.")
+                    ra = np.zeros(nelem, dtype=np.float64)
+                    dec = np.zeros(nelem, dtype=np.float64)
+                    # Temporary variable so as not to clobber `wavelength`.
+                    wcs_wl = np.zeros(nelem, dtype=np.float64)
+                    for i in range(nelem):
+                        ra[i], dec[i], wcs_wl[i], _ = self.wcs.forward_transform(
+                                        x_array[i], y_array[i])
                     ra[:] = -999.
                     dec[:] = -999.
                     wcs_wl[:] = -999.
@@ -2515,12 +2515,12 @@ def do_extract1d(input_model, refname, smoothing_length, bkg_order,
             elif extract_params['match'] == PARTIAL:
                 log.info('Spectral order %d not found, skipping ...', sp_order)
                 continue
+            # if input_model.meta.exposure.type not in WFSS_EXPTYPES:
             find_dispaxis(input_model, slit, sp_order, extract_params)
             if extract_params['dispaxis'] is None:
                 log.warning("The dispersion direction couldn't be determined, "
                             "so skipping ...")
                 continue
-
             try:
                 (ra, dec, wavelength, net, background, dq,
                  prev_offset) = extract_one_slit(
@@ -3149,6 +3149,7 @@ def extract_one_slit(input_model, slit, integ,
 
     if extract_params['ref_file_type'] == FILE_TYPE_IMAGE:
         # The reference file is an image.
+        log.debug("ref file type is {}".format(FILE_TYPE_IMAGE))
         extract_model = ImageExtractModel(input_model, slit, **extract_params)
         ap = None
     else:

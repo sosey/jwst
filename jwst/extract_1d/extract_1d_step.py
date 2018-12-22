@@ -65,31 +65,21 @@ class Extract1dStep(Step):
             it will be a model containing 1-D extracted spectra.
         """
 
+        valid_models = (datamodels.CubeModel,
+                        datamodels.ModelContainer,
+                        datamodels.ImageModel,
+                        datamodels.MultiSlitModel,
+                        datamodels.MultiProductModel,
+                        datamodels.IFUCubeModel,
+                        datamodels.DrizProductModel,
+                        datamodels.SlitModel)
+
         # Open the input and figure out what type of model it is
         input_model = datamodels.open(input)
-
-        if isinstance(input_model, datamodels.CubeModel):
-            # It's a 3-D multi-integration model
-            self.log.debug('Input is a CubeModel for a multiple integ. file')
-        elif isinstance(input_model, datamodels.ImageModel):
-            # It's a single 2-D image
-            self.log.debug('Input is an ImageModel')
-        elif isinstance(input_model, datamodels.ModelContainer):
-            self.log.debug('Input is a ModelContainer')
-        elif isinstance(input_model, datamodels.MultiSlitModel):
-            self.log.debug('Input is a MultiSlitModel')
-        elif isinstance(input_model, datamodels.MultiProductModel):
-            self.log.debug('Input is a MultiProductModel')
-        elif isinstance(input_model, datamodels.IFUCubeModel):
-            self.log.debug('Input is an IFUCubeModel')
-        elif isinstance(input_model, datamodels.DrizProductModel):
-            # Resampled 2-D data
-            self.log.debug('Input is a DrizProductModel')
-        elif isinstance(input_model, datamodels.SlitModel):
-            # NRS_BRIGHTOBJ mode
-            self.log.debug('Input is a SlitModel')
+        if isinstance(input_model, valid_models):
+            self.log.debug('Input is a {0:s}'.format(input_model.meta.model_type))
         else:
-            self.log.error('Input is a %s,', str(type(input_model)))
+            self.log.error('Input is a {0:s},'.format(type(input_model)))
             self.log.error('which was not expected for extract_1d.')
             self.log.error('extract_1d will be skipped.')
             input_model.meta.cal_step.extract_1d = 'SKIPPED'
